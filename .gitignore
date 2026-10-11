@@ -5,8 +5,5 @@ data/
 .DS_Store
 .chrome-cdp/
 .browse-tools/
-.chrome-cdp/
-.browse-tools/
 【请创建副本后使用】研发笔试——XXX.md
-*.md
-!README.md
+
