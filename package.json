@@ -1,0 +1,15 @@
+{
+  "name": "atoms-lab",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Atoms Lab：本地可运行的多智能体应用工作室。一句话生成可点击的网页，并能预览、修改、发布。",
+  "engines": {
+    "node": ">=22.13"
+  },
+  "scripts": {
+    "start": "node --experimental-sqlite server/index.js",
+    "dev": "node --watch --experimental-sqlite server/index.js",
+    "check": "node --experimental-sqlite scripts/check-compiler.mjs"
+  }
+}
