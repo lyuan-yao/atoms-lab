@@ -2,6 +2,23 @@ import { PALETTES } from "./spec.js";
 import { renderApp } from "./render.js";
 import { askModel } from "./llm.js";
 
+async function askWithFeedback(buildPrompt, validate, options = {}) {
+  const { attempts = 2, ...askOptions } = options;
+  let lastError;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      const prompt = attempt === 0
+        ? buildPrompt
+        : `${buildPrompt}\n注意：上一次返回未通过校验（${lastError.message}）。请修正这些问题，重新返回完整 JSON。`;
+      return validate(await askModel(prompt, askOptions));
+    } catch (error) {
+      if (error.status !== 502) throw error;
+      lastError = error;
+    }
+  }
+  throw lastError;
+}
+
 export const COSTS = { run: 15, contest: 30, iterate: 8 };
 
 const KINDS = new Set(["saas", "brand", "store", "booking", "dashboard", "todo", "blog", "game", "recommend"]);
@@ -26,6 +43,16 @@ function list(value, size, label) {
 function storageKey(brand, kind) {
   const n = [...`${brand}:${kind}`].reduce((sum, char) => sum + char.charCodeAt(0), 0);
   return `app${(n % 100000).toString(36)}`;
+}
+
+function resolveAgentRows(items, expectedAgents) {
+  const byId = new Map(items.map((item) => [item?.agent, item]));
+  const complete = expectedAgents.every((id) => byId.has(id));
+  const rows = complete ? expectedAgents.map((id) => byId.get(id)) : items.slice(0, expectedAgents.length);
+  if (rows.length < expectedAgents.length) {
+    throw Object.assign(new Error("模型返回的团队结论不够"), { status: 502 });
+  }
+  return rows;
 }
 
 export function specFromModel(prompt, raw) {
@@ -60,9 +87,8 @@ export function specFromModel(prompt, raw) {
   }
   if (kind === "store" && products.length < 3) throw Object.assign(new Error("网店至少需要三件模型写出的商品"), { status: 502 });
   if (kind === "booking" && services.length < 2) throw Object.assign(new Error("预约页至少需要两项模型写出的服务"), { status: 502 });
-  const atoms = list(raw.atoms, 8, "团队结论").slice(0, 8).map((item, index) => {
+  const atoms = resolveAgentRows(list(raw.atoms, 8, "团队结论"), AGENTS).map((item, index) => {
     const id = AGENTS[index];
-    if (item?.agent !== id) throw Object.assign(new Error("模型返回的团队顺序不正确"), { status: 502 });
     const evidence = text(item.evidence, 2, 40, "依据");
     return {
       role: "agent",
@@ -73,10 +99,15 @@ export function specFromModel(prompt, raw) {
     };
   });
   const corpus = [
-    raw.headline, raw.subhead, raw.offer,
+    raw.brand, raw.headline, raw.subhead, raw.audience, raw.offer,
     ...features.map((item) => item.title),
+    ...features.map((item) => item.body),
+    ...faqs.flatMap((item) => [item.q, item.a]),
+    ...plans.flatMap((item) => [item.name, ...item.points]),
     ...products.map((item) => item.name),
+    ...products.map((item) => item.note),
     ...services.map((item) => item.name),
+    ...services.map((item) => item.note),
   ].join("\n");
   for (const atom of atoms) {
     if (!corpus.includes(atom.evidence)) {
@@ -168,15 +199,17 @@ posts 为 {title, excerpt, body}，blog 至少 3 个，
 rows 为 {name, owner, status, amount}，dashboard 至少 6 个，
 todos 为 {title, done}，todo 至少 3 个，
 seo {title, description, keywords}，growth {headline, audience}，metric {name, why}，
-atoms 正好 8 个，agent 顺序固定为 Mike、Iris、Emma、Bob、Alex、Sarah、David、Adrian，每项含 title、body、evidence。
-evidence 必须从 headline、subhead、offer、feature.title、product.name 或 service.name 里原样摘出，并且这句话会出现在页面正文里。`;
+atoms 正好 8 个，这是八位团队角色的工作结论，agent 顺序固定为 Mike（团队领导，定范围）、Iris（深度研究，讲受众）、Emma（产品经理，列必须做对的三件事）、Bob（定页面结构）、Alex（编译页面内容与交互）、Sarah（准备搜索广告文案）、David（定数据与指标）、Adrian（提增长建议），每项含 title（2-16 字的结论标题）、body（8-220 字的具体结论，不要只写职责）、evidence。
+evidence 必须从页面正文文案（headline、subhead、offer、audience、feature 的 title 或 body、faq、plan、product.name、service.name 等）里原样摘出，并且这句话会出现在页面正文里。`;
 
 export async function createRun(prompt, { contest = false } = {}) {
-  const raw = await askModel(`${SCHEMA}
+  const { raw, spec } = await askWithFeedback(`${SCHEMA}
 ${contest ? "另外给出 directions 正好 3 个 {palette, layout, label}，layout 只能是 studio、split、bold，三套 palette 不能相同。" : "layout 填 studio。"}
 用户需求：${prompt}
-文案只能依据这段需求，不要套用任何固定品牌或示例价格。`);
-  const spec = specFromModel(prompt, raw);
+文案只能依据这段需求，不要套用任何固定品牌或示例价格。`, (modelRaw) => {
+    const spec = specFromModel(prompt, modelRaw);
+    return { raw: modelRaw, spec };
+  });
   const directions = directionsFrom(raw, spec, contest);
   const versions = directions.map((direction) => {
     const variant = direction.layout === "bold" ? 2 : direction.layout === "split" ? 1 : 0;
@@ -196,11 +229,10 @@ export async function iterateRun(previousSpec, _html, message) {
     palette: previousSpec.palette,
     features: previousSpec.features,
   };
-  const raw = await askModel(`${SCHEMA}
+  const { spec } = await askWithFeedback(`${SCHEMA}
 layout 填 studio。这是在已有版本上的修改，请返回完整的新 JSON，保留没有被要求改掉的事实。
 已有版本：${JSON.stringify(brief)}
-修改要求：${message}`);
-  const spec = specFromModel(`${previousSpec.prompt}\n补充要求：${message}`, raw);
+修改要求：${message}`, (raw) => ({ spec: specFromModel(`${previousSpec.prompt}\n补充要求：${message}`, raw) }));
   const rendered = renderApp(spec, { variant: 0, palette: spec.palette });
   return { spec, versions: [{ ...rendered, label: "模型修订" }], atoms: spec.atoms, mode: "model" };
 }
@@ -250,7 +282,7 @@ export async function createRunStages(prompt, { contest = false, emit = () => {}
   emit("stage", { agents: ["Mike", "Iris", "Emma"], status: "working", text: "Mike 正在定范围，Iris 在研究受众，Emma 在列范围。" });
   let brief;
   try {
-    brief = await askModel(`${BRIEF_SCHEMA}\n用户需求：${prompt}\n文案只能依据这段需求。`, { temperature: 0.5 });
+    brief = await askWithFeedback(`${BRIEF_SCHEMA}\n用户需求：${prompt}\n文案只能依据这段需求。`, (raw) => raw, { temperature: 0.5 });
   } catch (error) {
     throw Object.assign(new Error(`定向阶段失败：${error.message}`), { status: error.status || 502 });
   }
@@ -278,20 +310,18 @@ export async function createRunStages(prompt, { contest = false, emit = () => {}
   };
   let build;
   try {
-    build = await askModel(`${BUILD_SCHEMA}
+    build = await askWithFeedback(`${BUILD_SCHEMA}
 已定方向：${JSON.stringify(briefForBuild)}
 ${contest ? "另外给出 directions 正好 3 个 {palette, layout, label}，layout 只能是 studio、split、bold，三套 palette 不能相同。" : "layout 填 studio。"}
 用户需求：${prompt}
-商品、服务、价格必须贴合这个需求，不要套用任何固定品牌或示例价格。`, { temperature: 0.4 });
+商品、服务、价格必须贴合这个需求，不要套用任何固定品牌或示例价格。`, (raw) => raw, { temperature: 0.4 });
   } catch (error) {
     throw Object.assign(new Error(`编译阶段失败：${error.message}`), { status: error.status || 502 });
   }
   const buildAgents = ["Bob", "Alex", "Sarah", "David", "Adrian"];
-  const buildAtoms = list(build.atoms, 5, "团队结论").slice(0, 5).map((item, index) => {
-    const id = buildAgents[index];
-    if (item?.agent !== id) throw Object.assign(new Error("模型返回的团队顺序不正确"), { status: 502 });
+  const buildAtoms = resolveAgentRows(list(build.atoms, 5, "团队结论"), buildAgents).map((item, index) => {
     const evidence = text(item.evidence, 2, 40, "依据");
-    return { agent: id, title: text(item.title, 2, 16, "结论标题"), body: text(item.body, 8, 220, "结论"), evidence };
+    return { agent: buildAgents[index], title: text(item.title, 2, 16, "结论标题"), body: text(item.body, 8, 220, "结论"), evidence };
   });
   for (const [index, atom] of buildAtoms.entries()) {
     if (index) await sleep(260);
