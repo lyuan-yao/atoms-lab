@@ -256,7 +256,7 @@ function showDraft(ui) {
   ui.code.hidden = true;
   ui.empty.hidden = false;
   ui.empty.textContent = "生成完成后，页面会出现在这里。";
-  ui.messages.innerHTML = `<div class="draft-hint"><h2>今天想让团队做什么？</h2><p class="muted">写清名字、对象，以及一个必须能点完的动作。发送后你会看到八位角色 real time 分工。</p></div>`;
+  ui.messages.innerHTML = `<div class="draft-hint"><h2>今天想让团队做什么？</h2><p class="muted">写清名字、对象，以及一个必须能点完的动作。发送后你会看到八位角色实时分工。</p></div>`;
   paintCost(ui);
   ui.area.focus();
 }
