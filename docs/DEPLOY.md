@@ -1,4 +1,46 @@
-# 部署指南（Render 示例，零依赖 Node 22 应用）
+# 部署指南（阿里云轻量 / Render / 本地，零依赖 Node 22 应用）
+
+## 0. 阿里云轻量应用服务器（当前线上环境）
+
+```bash
+# 1) 服务器：Ubuntu 22.04，安全组/防火墙放行 TCP 22、4173
+# 2) 安装 Node 22（国内镜像）
+ssh root@<服务器IP>
+mkdir -p /usr/local/node22 && cd /tmp
+curl -fsSL -o node.tar.xz https://registry.npmmirror.com/-/binary/node/v22.13.0/node-v22.13.0-linux-x64.tar.xz
+tar -xJf node.tar.xz -C /usr/local/node22 --strip-components=1 && rm node.tar.xz
+ln -sf /usr/local/node22/bin/node /usr/local/bin/node
+
+# 3) 代码（scp 直传或 git clone）
+mkdir -p /opt/atoms-lab && tar -xzf app.tgz -C /opt/atoms-lab   # 仓库打包，排除 .git/data
+
+# 4) 密钥放服务器本地（600 权限，不进仓库）
+cat > /etc/atoms-lab.env <<'EOF'
+PORT=4173
+ATOMS_LLM_BASE=https://api.deepseek.com/v1
+ATOMS_LLM_MODEL=deepseek-chat
+ATOMS_LLM_KEY=sk-xxx
+EOF
+chmod 600 /etc/atoms-lab.env
+
+# 5) systemd 常驻 + 开机自启 + 崩溃自动拉起
+cat > /etc/systemd/system/atoms-lab.service <<'EOF'
+[Unit]
+Description=Atoms Lab - multi-agent app studio
+After=network.target
+[Service]
+WorkingDirectory=/opt/atoms-lab
+EnvironmentFile=/etc/atoms-lab.env
+ExecStart=/usr/local/node22/bin/node --experimental-sqlite server/index.js
+Restart=always
+RestartSec=3
+[Install]
+WantedBy=multi-user.target
+EOF
+systemctl daemon-reload && systemctl enable --now atoms-lab
+```
+
+> 提示：不要在页面里放任何渲染阻塞的外部资源（如 Google Fonts），国内会被墙拖慢首屏；字体请自托管（仓库 `public/fonts/` 已内置）。
 
 ## 1. 代码到 GitHub
 

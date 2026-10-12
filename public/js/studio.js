@@ -57,14 +57,27 @@ export async function renderStudio(root) {
         <div class="tabs"><button type="button" data-device="desktop" class="is-on">桌面</button><button type="button" data-device="phone">手机</button></div>
         <button class="btn-soft" type="button" data-edit>编辑文字</button>
         <button class="btn-ghost" type="button" data-download>导出</button>
+        <button class="btn-ghost" type="button" data-versions hidden>版本 <b data-versions-n>0</b></button>
         <button class="btn-ghost" type="button" data-stats hidden>浏览 <b data-stat-n>0</b></button>
         <button class="btn-primary" type="button" data-publish>发布</button>
         <a data-published hidden target="_blank" rel="noopener">打开发布页</a>
       </div>
+      <div class="versions-panel" data-versions-panel hidden>
+        <strong>版本时间线 <span class="muted" style="font-weight:400">点「选用」退回到任何一版，已发布链接不受影响</span></strong>
+        <div class="versions-list" data-versions-list></div>
+      </div>
       <div class="stats-panel" data-stats-panel hidden>
-        <strong>过去 7 天真实浏览</strong>
+        <strong>过去 7 天真实浏览 <b data-stat-n2></b></strong>
         <div class="stat-bars" data-stat-bars></div>
-        <p class="muted">每次有人打开发布链接，这里的数字就会增加。数据来自本机服务，不是演示值。</p>
+        <p class="muted" data-stat-meta>每次有人打开发布链接，这里的数字就会增加。数据来自本机服务，不是演示值。</p>
+        <div class="serp" data-serp>
+          <span class="kicker">Sarah · 搜索结果预览</span>
+          <div class="serp-card">
+            <span class="serp-site">Atoms Lab › p › <span data-serp-slug></span></span>
+            <strong data-serp-title></strong>
+            <p data-serp-desc></p>
+          </div>
+        </div>
       </div>
       <div class="editbar" data-editbar hidden>
         <span data-edit-label>选中文字</span>
@@ -133,6 +146,8 @@ function bind(root) {
     name: root.querySelector("[data-name]"),
     statsBtn: root.querySelector("[data-stats]"),
     statsPanel: root.querySelector("[data-stats-panel]"),
+    versionsBtn: root.querySelector("[data-versions]"),
+    versionsPanel: root.querySelector("[data-versions-panel]"),
     project: null,
     versions: [],
     publication: null,
@@ -192,7 +207,13 @@ function bind(root) {
   root.querySelector("[data-publish]").addEventListener("click", () => publish(ui));
   ui.statsBtn.addEventListener("click", () => {
     ui.statsPanel.hidden = !ui.statsPanel.hidden;
+    ui.versionsPanel.hidden = true;
     if (!ui.statsPanel.hidden) paintStats(ui);
+  });
+  ui.versionsBtn.addEventListener("click", () => {
+    ui.versionsPanel.hidden = !ui.versionsPanel.hidden;
+    ui.statsPanel.hidden = true;
+    if (!ui.versionsPanel.hidden) paintVersions(ui);
   });
   ui.refine.querySelector("[data-refine-manual]").addEventListener("click", () => {
     const target = ui.refine.dataset.target;
@@ -249,6 +270,8 @@ function showDraft(ui) {
   ui.root.querySelector("[data-published]").hidden = true;
   ui.statsBtn.hidden = true;
   ui.statsPanel.hidden = true;
+  ui.versionsBtn.hidden = true;
+  ui.versionsPanel.hidden = true;
   ui.picker.hidden = true;
   hideRefine(ui);
   ui.iframe.src = "about:blank";
@@ -318,6 +341,7 @@ function paintPublication(ui) {
   }
   ui.statsBtn.hidden = !has;
   if (has) ui.statsBtn.querySelector("[data-stat-n]").textContent = String(ui.publication.views ?? 0);
+  paintVersions(ui);
   if (has) paintStats(ui);
   else ui.statsPanel.hidden = true;
 }
@@ -327,6 +351,120 @@ function paintStats(ui) {
   const bars = ui.root.querySelector("[data-stat-bars]");
   const max = Math.max(1, ...week.map((item) => item.count));
   bars.innerHTML = week.map((item) => `<div class="stat-col"><i style="height:${Math.round((item.count / max) * 64) + 3}px"></i><span>${item.day.slice(5)}</span><b>${item.count}</b></div>`).join("");
+  const likes = Number(ui.publication?.likes ?? 0);
+  const comments = Number(ui.publication?.comments ?? 0);
+  const health = ui.publication?.health;
+  const meta = ui.root.querySelector("[data-stat-meta]");
+  if (meta) {
+    let text = "每次有人打开发布链接，这里的数字就会增加。数据来自本机服务，不是演示值。";
+    const parts = [];
+    if (likes) parts.push(`${likes} 位访客点了「有用」`);
+    if (comments) parts.push(`${comments} 条访客留言`);
+    if (health) parts.push(`团队自检 ${health.score} 分（${health.passed}/${health.total}）`);
+    if (parts.length) text += ` 已有${parts.join("，")}。`;
+    meta.textContent = text;
+  }
+  const seo = ui.project?.spec?.seo || {};
+  const serp = ui.root.querySelector("[data-serp]");
+  if (serp) {
+    if (seo.title || seo.description) {
+      serp.hidden = false;
+      serp.querySelector("[data-serp-slug]").textContent = ui.publication?.slug || "";
+      serp.querySelector("[data-serp-title]").textContent = seo.title || ui.project?.name || "";
+      serp.querySelector("[data-serp-desc]").textContent = seo.description || "";
+    } else {
+      serp.hidden = true;
+    }
+  }
+}
+
+function paintVersions(ui) {
+  const btn = ui.root.querySelector("[data-versions]");
+  const list = ui.root.querySelector("[data-versions-list]");
+  btn.hidden = ui.versions.length < 2;
+  btn.querySelector("[data-versions-n]").textContent = String(ui.versions.length);
+  const comparing = Boolean(ui.compare?.on);
+  list.innerHTML = [
+    `<div class="compare-bar"><button class="btn-soft" type="button" data-compare-toggle>${comparing ? "退出对比" : "对比模式"}</button>${comparing ? '<span class="muted">在两行上点「选作对比」</span>' : '<span class="muted">把任意两版并排放在一起看区别</span>'}</div>`,
+    ...[...ui.versions].reverse().map((version) => {
+      const isCurrent = version.id === ui.project?.currentVersionId;
+      const selected = comparing && (ui.compare.a === version.id || ui.compare.b === version.id);
+      return `<div class="version-row ${isCurrent ? "is-current" : ""} ${selected ? "is-picked-c" : ""}">
+        <div><b>${esc(version.label)}</b><span class="muted">${new Date(version.createdAt).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}${isCurrent ? " · 当前" : ""}</span></div>
+        <div class="version-actions">
+          ${comparing ? `<button class="btn-soft" type="button" data-compare-pick="${version.id}">${ui.compare.a === version.id ? "对比左" : ui.compare.b === version.id ? "对比右" : "选作对比"}</button>` : ""}
+          ${!isCurrent && !comparing ? `<button class="btn-soft" type="button" data-rollback="${version.id}">选用</button>` : ""}
+        </div>
+      </div>`;
+    }),
+    comparing && ui.compare.a && ui.compare.b ? `<div class="compare-grid">
+      <div><span class="kicker">版本 A</span><iframe src="/api/versions/${ui.compare.a}/preview" title="版本 A"></iframe></div>
+      <div><span class="kicker">版本 B</span><iframe src="/api/versions/${ui.compare.b}/preview" title="版本 B"></iframe></div>
+    </div>` : "",
+  ].join("");
+  const toggle = list.querySelector("[data-compare-toggle]");
+  if (toggle) toggle.addEventListener("click", () => {
+    ui.compare = ui.compare && ui.compare.on ? { on: false } : { on: true, a: null, b: null };
+    paintVersions(ui);
+  });
+  list.querySelectorAll("[data-rollback]").forEach((button) => button.addEventListener("click", async () => {
+    try {
+      const data = await api(`/api/projects/${ui.project.id}/current`, { method: "POST", body: { versionId: button.dataset.rollback } });
+      ui.project = data.project;
+      ui.versions = data.versions;
+      ui.publication = data.publication;
+      paintStage(ui);
+      paintVersions(ui);
+      toast(`已退回到「${data.versions.find((v) => v.id === data.project.currentVersionId)?.label || "该版本"}」`);
+    } catch (error) {
+      toast(error.message, "bad");
+    }
+  }));
+  list.querySelectorAll("[data-compare-pick]").forEach((button) => button.addEventListener("click", () => {
+    if (!ui.compare.a || ui.compare.a === button.dataset.comparePick) {
+      ui.compare.a = button.dataset.comparePick;
+    } else if (!ui.compare.b) {
+      ui.compare.b = button.dataset.comparePick;
+    } else {
+      ui.compare = { on: true, a: button.dataset.comparePick, b: null };
+    }
+    if (ui.compare.a && ui.compare.b && ui.compare.a === ui.compare.b) ui.compare.b = null;
+    paintVersions(ui);
+  }));
+}
+
+function suggestNext(ui) {
+  const atoms = [...ui.messages.querySelectorAll(".atom")].slice(-8);
+  const picks = [];
+  for (const role of ["Adrian", "David", "Sarah", "Emma", "Iris"]) {
+    const atom = atoms.find((a) => (a.querySelector("h3")?.textContent || "").startsWith(role));
+    const body = atom?.querySelector("p")?.textContent || "";
+    if (!body) continue;
+    const idea = body.split(/[。；]/)[0].trim().slice(0, 44);
+    if (idea.length < 8) continue;
+    picks.push({ role, text: `按 ${role} 的建议改一版：${idea}` });
+    if (picks.length >= 3) break;
+  }
+  if (!picks.length) return;
+  const row = document.createElement("div");
+  row.className = "suggest-row";
+  row.innerHTML = `<span class="kicker">团队建议的下一步</span><div class="suggest-chips"></div>`;
+  const chips = row.querySelector(".suggest-chips");
+  picks.forEach((pick) => {
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = "chip";
+    chip.textContent = `${pick.role}：${pick.text.slice(8, 30)}…`;
+    chip.addEventListener("click", () => {
+      ui.area.value = pick.text;
+      ui.area.focus();
+      ui.area.scrollIntoView({ block: "center", behavior: "smooth" });
+      toast("建议已填入输入框，可直接发送");
+    });
+    chips.appendChild(chip);
+  });
+  ui.messages.appendChild(row);
+  ui.messages.scrollTop = ui.messages.scrollHeight;
 }
 
 async function runStream(ui, request) {
@@ -416,16 +554,20 @@ async function runStream(ui, request) {
       const data = donePayload;
       ui.messages.replaceChildren();
       data.messages.slice(0, data.messages.length).forEach((message, index, arr) => {
-        ui.messages.appendChild(message.role === "user" ? userNode(message.body) : atomNode(message, ui));
+        ui.messages.appendChild(messageNode(message, ui));
         if (index === arr.length - 1 && data.changes?.length) ui.messages.appendChild(diffNode(data.changes, ui));
       });
       ui.messages.scrollTop = ui.messages.scrollHeight;
       paintPublication(ui);
       paintStage(ui);
       if (data.changes?.length) toast(`改了 ${data.changes.length} 处，点改动卡片可以定位`);
+      await runSelfCheck(ui);
+      suggestNext(ui);
     } else {
       await refreshProjects(ui);
       await openProject(ui, donePayload.projectId, donePayload);
+      await runSelfCheck(ui);
+      suggestNext(ui);
     }
   } else if (hadError) {
     toast(hadError.message, "bad");
@@ -441,6 +583,108 @@ async function runStream(ui, request) {
     }
   }
   submit.disabled = false;
+}
+
+async function runSelfCheck(ui) {
+  const html = currentHtml(ui);
+  if (!html || !ui.project) return;
+  const { details } = await probeInteractions(html);
+  if (!details.length) return;
+  try {
+    const data = await api(`/api/projects/${ui.project.id}/selfcheck`, { method: "POST", body: { details } });
+    ui.messages.appendChild(checkNode(data.message));
+    ui.messages.scrollTop = ui.messages.scrollHeight;
+    const passed = (data.message.body.match(/^✓/gm) || []).length;
+    const total = (data.message.body.match(/^[✓✗]/gm) || []).length;
+    toast(total ? `团队自检：${total} 处交互，${passed} 处有真实响应` : "自检完成", passed === total ? "ok" : "bad");
+  } catch {
+    // 自检失败不影响生成结果
+  }
+}
+
+function probeInteractions(html) {
+  return new Promise((resolve) => {
+    const frame = document.createElement("iframe");
+    frame.style.cssText = "position:fixed;left:-9999px;top:0;width:1024px;height:768px;visibility:hidden;border:0";
+    let settled = false;
+    const finish = (details) => {
+      if (settled) return;
+      settled = true;
+      frame.remove();
+      resolve({ details });
+    };
+    frame.addEventListener("load", async () => {
+      if (settled) return;
+      try {
+        const doc = frame.contentDocument;
+        if (!doc?.body) return finish([]);
+        const details = [];
+        const order = (el) => {
+          if (el.matches("[data-service]")) return 0;
+          if (el.matches("[data-time]")) return 1;
+          if (el.matches("[data-add]")) return 2;
+          if (el.matches("[data-filter]")) return 3;
+          if (el.closest("[data-todo-add],[data-book-form]")) return 4;
+          if (el.matches("[data-task],[data-post],[data-read]")) return 5;
+          return 6;
+        };
+        const targets = [...doc.querySelectorAll("button,[role=button]")]
+          .filter((el) => !el.disabled && el.getClientRects().length && !el.closest("nav"))
+          .sort((a, b) => order(a) - order(b))
+          .slice(0, 16);
+        for (const el of targets) {
+          const label = (el.getAttribute("aria-label") || el.textContent || "按钮").trim().replace(/\s+/g, " ").slice(0, 16) || "按钮";
+          let hits = 0;
+          const mo = new MutationObserver((list) => { hits += list.length; });
+          mo.observe(doc.body, { subtree: true, childList: true, attributes: true, characterData: true });
+          await new Promise((r) => setTimeout(r, 120));
+          const baseline = hits;
+          hits = 0;
+          el.click();
+          await new Promise((r) => setTimeout(r, 170));
+          mo.disconnect();
+          details.push({ label, ok: hits > baseline });
+        }
+        for (const form of [...doc.querySelectorAll("form[data-todo-add],form[data-book-form]")].slice(0, 1)) {
+          let hits = 0;
+          const mo = new MutationObserver((list) => { hits += list.length; });
+          mo.observe(doc.body, { subtree: true, childList: true, characterData: true });
+          await new Promise((r) => setTimeout(r, 120));
+          const baseline = hits;
+          hits = 0;
+          const input = form.querySelector("input[name]");
+          if (input) {
+            const proto = input.tagName === "TEXTAREA" ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+            Object.getOwnPropertyDescriptor(proto, "value").set.call(input, "自检探针");
+            input.dispatchEvent(new Event("input", { bubbles: true }));
+          }
+          form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+          await new Promise((r) => setTimeout(r, 220));
+          mo.disconnect();
+          const label = (input?.placeholder || "表单提交").slice(0, 16);
+          details.push({ label: input && input.placeholder ? label : "表单提交", ok: hits > baseline });
+        }
+        frame.style.width = "390px";
+        await new Promise((r) => setTimeout(r, 320));
+        const overflowX = doc.documentElement.scrollWidth - doc.documentElement.clientWidth;
+        details.push({ label: "手机版无横向溢出", ok: overflowX <= 2 });
+        let outCount = 0;
+        for (const el of doc.body.querySelectorAll("*")) {
+          if (outCount > 6) break;
+          const rect = el.getBoundingClientRect();
+          if (rect.width > 0 && rect.right > 392 && getComputedStyle(el).position !== "fixed") outCount += 1;
+        }
+        details.push({ label: outCount ? `手机端 ${outCount} 处元素出屏` : "手机端元素不出屏", ok: outCount === 0 });
+        frame.style.width = "1024px";
+        finish(details);
+      } catch {
+        finish([]);
+      }
+    });
+    frame.srcdoc = html;
+    document.body.appendChild(frame);
+    setTimeout(() => finish([]), 8000);
+  });
 }
 
 function parseFrame(frame) {
@@ -474,7 +718,26 @@ function stageNode() {
 
 function messageNode(message, ui) {
   if (message.role === "user") return userNode(message.body);
+  if (message.role === "check") return checkNode(message);
   return atomNode(message, ui);
+}
+
+function checkNode(message) {
+  const node = document.createElement("article");
+  node.className = "diff-card check-card";
+  const passed = (message.body.match(/^✓/gm) || []).length;
+  const total = (message.body.match(/^[✓✗]/gm) || []).length;
+  node.innerHTML = `<h3>${esc(message.title || `交互自检 ${passed}/${total} 通过`)}<span class="check-badge ${passed === total ? "is-all" : ""}">${passed === total ? "全部可用" : "部分无响应"}</span></h3><div class="check-list"></div>`;
+  const list = node.querySelector(".check-list");
+  message.body.split("\n").forEach((line) => {
+    const row = document.createElement("div");
+    row.className = `check-row ${line.startsWith("✓") ? "ok" : "bad"}`;
+    row.innerHTML = `<b></b><span></span>`;
+    row.querySelector("b").textContent = line.slice(0, 1);
+    row.querySelector("span").textContent = line.slice(1).trim();
+    list.appendChild(row);
+  });
+  return node;
 }
 
 function atomNode(message, ui) {
@@ -588,6 +851,8 @@ function paintStage(ui) {
       ui.versions = data.versions;
       ui.publication = data.publication;
       paintStage(ui);
+      paintVersions(ui);
+      await runSelfCheck(ui);
     }));
     ui.frame.hidden = true;
     ui.empty.hidden = false;
@@ -784,16 +1049,19 @@ async function publish(ui) {
     return;
   }
   try {
-    const result = await api(`/api/projects/${ui.project.id}/publish`, { method: "POST", body: {} });
-    ui.publication = { ...(ui.publication || {}), slug: result.slug, versionId: ui.project.currentVersionId, views: ui.publication?.views || 0, week: ui.publication?.week || [] };
+    const data = await api(`/api/projects/${ui.project.id}/publish`, { method: "POST", body: {} });
+    ui.project = data.project;
+    ui.versions = data.versions;
+    ui.publication = data.publication;
     const link = ui.root.querySelector("[data-published]");
     link.hidden = false;
-    link.href = result.url;
+    link.href = `/p/${data.publication.slug}`;
     link.textContent = "打开发布页";
     ui.statsBtn.hidden = false;
+    paintPublication(ui);
     await refreshProjects(ui);
     toast("已发布，浏览数据会真实累计");
-    window.open(result.url, "_blank", "noopener");
+    window.open(`/p/${data.publication.slug}`, "_blank", "noopener");
   } catch (error) {
     toast(error.message, "bad");
   }

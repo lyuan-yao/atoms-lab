@@ -218,9 +218,17 @@ async function loadExamples(root, area) {
     const { examples } = await api("/api/examples");
     chips.innerHTML = examples.map((item) => `<button class="chip" type="button" data-prompt="${esc(item.prompt)}">${esc(item.title)}</button>`).join("");
     gallery.innerHTML = examples.map((item) => `<button class="shot" type="button" data-open="${item.key}" data-title="${esc(item.title)}" data-prompt="${esc(item.prompt)}">
-      <span class="shot-face"><b></b><em></em><span><i></i><i></i></span></span>
-      <strong>${esc(item.title)}</strong>
+      <span class="shot-thumb"><iframe src="/api/examples/${item.key}/preview" loading="lazy" tabindex="-1" title="${esc(item.title)}"></iframe></span>
+      <strong>${esc(item.title)}<small class="muted">模型真实编译 · 点开可操作</small></strong>
     </button>`).join("");
+    const fitThumbs = () => gallery.querySelectorAll(".shot-thumb").forEach((span) => {
+      span.style.setProperty("--s", String(Math.min(1, span.clientWidth / 1280)));
+    });
+    if (window.ResizeObserver) {
+      const ro = new ResizeObserver(fitThumbs);
+      gallery.querySelectorAll(".shot-thumb").forEach((span) => ro.observe(span));
+    }
+    fitThumbs();
     chips.querySelectorAll("[data-prompt]").forEach((button) => button.addEventListener("click", () => {
       area.value = button.dataset.prompt;
       area.focus();
@@ -239,7 +247,7 @@ async function loadExamples(root, area) {
       const text = frame.contentDocument?.body?.innerText || "";
       root.querySelector("[data-example-note]").textContent = text.includes("还没有真实内容")
         ? "还没有模型，这里不会放模板页"
-        : "可以直接在里面点击";
+        : "真实模型编译的示例，可以直接点击操作";
     });
     root.querySelector("[data-close]").addEventListener("click", closeModal);
     modal.addEventListener("click", (event) => {
@@ -394,12 +402,18 @@ export async function renderExplore(root) {
       grid.innerHTML = `<div class="empty-explore"><h3>还没有人发布</h3><p class="muted">到工作室生成一个应用并发布，它就会出现在这里。</p><p><a class="btn-primary" href="/studio" data-link>去工作室</a></p></div>`;
       return;
     }
-    grid.innerHTML = apps.map((app) => `<a class="explore-card" href="${esc(app.url)}" target="_blank" rel="noopener">
-      <span class="kicker">${esc(KIND_LABEL(app.kind))} · ${app.views} 次浏览</span>
-      <strong>${esc(app.name)}</strong>
-      <p class="muted">${esc((app.prompt || "").slice(0, 60))}</p>
-      <span class="muted open-hint">打开发布页 →</span>
-    </a>`).join("");
+    grid.innerHTML = apps.map((app) => `<article class="explore-card">
+      <a class="explore-link" href="${esc(app.url)}" target="_blank" rel="noopener">
+        <span class="kicker">${esc(KIND_LABEL(app.kind))} · ${app.views} 次浏览${app.likes ? ` · 👍 ${app.likes}` : ""}${app.comments ? ` · 💬 ${app.comments}` : ""}${app.health !== null && app.health !== undefined ? ` · <b class="health${app.health === 100 ? " is-full" : ""}">自检 ${app.health} 分</b>` : ""}</span>
+        <strong>${esc(app.name)}</strong>
+        <p class="muted">${esc((app.prompt || "").slice(0, 60))}</p>
+        <span class="muted open-hint">打开发布页 →</span>
+      </a>
+      <button class="btn-soft remix" type="button" data-remix="${esc(app.prompt)}">复刻这个想法</button>
+    </article>`).join("");
+    grid.querySelectorAll("[data-remix]").forEach((button) => button.addEventListener("click", () => {
+      beginPrompt(button.dataset.remix, false);
+    }));
   } catch (error) {
     grid.innerHTML = `<p class="muted center">${esc(error.message)}</p>`;
   }
@@ -476,6 +490,7 @@ export function renderLogin(root) {
       ${register ? '<label class="field"><span>名字</span><input name="name" autocomplete="nickname" required /></label>' : ""}
       <label class="field"><span>邮箱</span><input name="email" type="email" autocomplete="email" placeholder="you@studio.com" required /></label>
       <label class="field"><span>密码</span><input name="password" type="password" autocomplete="${register ? "new-password" : "current-password"}" minlength="6" required /></label>
+      ${register ? `<label class="field"><span>邮箱验证码</span><span class="code-row"><input name="code" inputmode="numeric" maxlength="6" placeholder="6 位数字" required /><button class="btn-soft" type="button" data-code>获取验证码</button></span></label><p class="code-hint" data-code-hint hidden></p>` : ""}
       <p class="form-error" data-error></p>
       <button class="btn-primary continue" type="submit">${register ? "创建并进入" : "继续"}</button>
       <button class="btn-soft continue" type="button" data-guest>以访客身份进入</button>
@@ -497,6 +512,46 @@ export function renderLogin(root) {
   bindLogout(root);
   const form = root.querySelector("[data-auth]");
   const error = root.querySelector("[data-error]");
+  const codeButton = root.querySelector("[data-code]");
+  const codeHint = root.querySelector("[data-code-hint]");
+  if (codeButton) {
+    codeButton.addEventListener("click", async () => {
+      error.textContent = "";
+      const email = form.email.value.trim();
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        error.textContent = "先填写正确的邮箱，再获取验证码";
+        return;
+      }
+      codeButton.disabled = true;
+      codeButton.textContent = "发送中…";
+      try {
+        const data = await api("/api/auth/request-code", { method: "POST", body: { email } });
+        if (data.channel === "demo") {
+          codeHint.hidden = false;
+          codeHint.innerHTML = `邮件服务未配置（演示通道）：验证码 <b>${esc(data.devCode)}</b>，10 分钟内有效。配置 ATOMS_SMTP_* 后将真实发送到邮箱。`;
+        } else {
+          codeHint.hidden = false;
+          codeHint.textContent = data.message || "验证码已发送，请查收邮箱";
+        }
+        let wait = 60;
+        codeButton.textContent = `${wait}s`;
+        const timer = setInterval(() => {
+          wait -= 1;
+          if (wait <= 0) {
+            clearInterval(timer);
+            codeButton.disabled = false;
+            codeButton.textContent = "重新获取";
+          } else {
+            codeButton.textContent = `${wait}s`;
+          }
+        }, 1000);
+      } catch (err) {
+        error.textContent = err.message;
+        codeButton.disabled = false;
+        codeButton.textContent = "获取验证码";
+      }
+    });
+  }
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
     error.textContent = "";

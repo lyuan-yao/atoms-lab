@@ -1,6 +1,7 @@
 import { PALETTES } from "./spec.js";
 import { renderApp } from "./render.js";
 import { askModel } from "./llm.js";
+import { pickGlyph } from "./art.js";
 
 async function askWithFeedback(buildPrompt, validate, options = {}) {
   const { attempts = 2, ...askOptions } = options;
@@ -64,6 +65,7 @@ export function specFromModel(prompt, raw) {
   const features = list(raw.features, 3, "功能").slice(0, 3).map((item) => ({
     title: text(item?.title, 2, 24, "功能标题"),
     body: text(item?.body, 4, 80, "功能说明"),
+    emoji: pickGlyph(item?.emoji),
   }));
   const faqs = list(raw.faqs, 3, "问题").slice(0, 3).map((item) => ({
     q: text(item?.q, 2, 40, "问题"),
@@ -79,6 +81,7 @@ export function specFromModel(prompt, raw) {
     name: text(item?.name, 1, 24, label),
     price: Number(item?.price),
     note: text(item?.note, 1, 40, label),
+    emoji: pickGlyph(item?.emoji),
   });
   const products = Array.isArray(raw.products) ? raw.products.slice(0, 6).map((item) => money(item, "商品")) : [];
   const services = Array.isArray(raw.services) ? raw.services.slice(0, 6).map((item) => money(item, "服务")) : [];
@@ -118,11 +121,13 @@ export function specFromModel(prompt, raw) {
     name: text(item?.name, 1, 24, "地点"),
     area: text(item?.area, 1, 12, "区域"),
     note: text(item?.note, 4, 40, "推荐理由"),
+    emoji: pickGlyph(item?.emoji),
   })) : [];
   const posts = Array.isArray(raw.posts) ? raw.posts.slice(0, 4).map((item) => ({
     title: text(item?.title, 2, 32, "篇名"),
     excerpt: text(item?.excerpt, 4, 60, "摘要"),
     body: text(item?.body, 8, 280, "正文"),
+    emoji: pickGlyph(item?.emoji),
   })) : [];
   const rows = Array.isArray(raw.rows) ? raw.rows.slice(0, 8).map((item) => ({
     name: text(item?.name, 1, 24, "客户"),
@@ -178,38 +183,46 @@ export function specFromModel(prompt, raw) {
 
 function directionsFrom(raw, spec, contest) {
   if (!contest) return [{ palette: spec.palette, layout: spec.layout, label: "当前方案" }];
-  const rows = list(raw.directions, 3, "竞赛方案").slice(0, 3).map((item, index) => {
-    if (!PALETTES[item?.palette] || !LAYOUTS.has(item?.layout)) {
-      throw Object.assign(new Error("竞赛方案的配色或版式不可用"), { status: 502 });
-    }
-    return { palette: item.palette, layout: item.layout, label: text(item.label, 2, 24, "方案名") || `方案 ${index + 1}` };
-  });
-  return rows;
+  const items = Array.isArray(raw?.directions) ? raw.directions.slice(0, 3) : [];
+  const rows = [];
+  for (const [index, item] of items.entries()) {
+    if (!PALETTES[item?.palette] || !LAYOUTS.has(item?.layout)) continue;
+    if (rows.some((row) => row.palette === item.palette)) continue;
+    rows.push({ palette: item.palette, layout: item.layout, label: text(item.label, 2, 24, "方案名") || `方案 ${rows.length + 1}` });
+  }
+  const layoutCycle = ["studio", "split", "bold"];
+  const sparePalettes = Object.keys(PALETTES).filter((key) => !rows.some((row) => row.palette === key));
+  while (rows.length < 3) {
+    const palette = sparePalettes.shift() || Object.keys(PALETTES)[rows.length % Object.keys(PALETTES).length];
+    rows.push({ palette, layout: layoutCycle[rows.length % layoutCycle.length], label: `方案 ${rows.length + 1}` });
+  }
+  return rows.slice(0, 3);
 }
 
 const SCHEMA = `只返回 JSON。kind 只能是 saas、brand、store、booking、dashboard、todo、blog、game、recommend 之一。palette 只能是 cobalt、forest、coffee、ink、rose、violet、amber、night。
 字段：brand, audience, offer, headline, subhead, palette, kind,
-features 正好 3 个 {title, body},
+features 正好 3 个 {title, body, emoji},
 faqs 正好 3 个 {q, a},
 plans 正好 3 个 {name, year, month, points}，points 至少 2 条，价格用人民币，
-products 为 {name, price, note} 且 price 是数字，store 至少 3 个，
-services 为 {name, price, note}，booking 至少 2 个，
-places 为 {name, area, note}，recommend 至少 4 个，
-posts 为 {title, excerpt, body}，blog 至少 3 个，
+products 为 {name, price, note, emoji} 且 price 是数字，store 至少 3 个，
+services 为 {name, price, note, emoji}，booking 至少 2 个，
+places 为 {name, area, note, emoji}，recommend 至少 4 个，
+posts 为 {title, excerpt, body, emoji}，blog 至少 3 个，
 rows 为 {name, owner, status, amount}，dashboard 至少 6 个，
 todos 为 {title, done}，todo 至少 3 个，
 seo {title, description, keywords}，growth {headline, audience}，metric {name, why}，
+emoji 填一个最贴合该条目的单个 emoji 字符（如 🍢☕🌿🎯🏺），只填 emoji 本身，不要词语，products/services/places/posts/features 每条都要有。
 atoms 正好 8 个，这是八位团队角色的工作结论，agent 顺序固定为 Mike（团队领导，定范围）、Iris（深度研究，讲受众）、Emma（产品经理，列必须做对的三件事）、Bob（定页面结构）、Alex（编译页面内容与交互）、Sarah（准备搜索广告文案）、David（定数据与指标）、Adrian（提增长建议），每项含 title（2-16 字的结论标题）、body（8-220 字的具体结论，不要只写职责）、evidence。
 evidence 必须从页面正文文案（headline、subhead、offer、audience、feature 的 title 或 body、faq、plan、product.name、service.name 等）里原样摘出，并且这句话会出现在页面正文里。`;
 
-export async function createRun(prompt, { contest = false } = {}) {
+export async function createRun(prompt, { contest = false, attempts } = {}) {
   const { raw, spec } = await askWithFeedback(`${SCHEMA}
 ${contest ? "另外给出 directions 正好 3 个 {palette, layout, label}，layout 只能是 studio、split、bold，三套 palette 不能相同。" : "layout 填 studio。"}
 用户需求：${prompt}
 文案只能依据这段需求，不要套用任何固定品牌或示例价格。`, (modelRaw) => {
     const spec = specFromModel(prompt, modelRaw);
     return { raw: modelRaw, spec };
-  });
+  }, { attempts });
   const directions = directionsFrom(raw, spec, contest);
   const versions = directions.map((direction) => {
     const variant = direction.layout === "bold" ? 2 : direction.layout === "split" ? 1 : 0;
@@ -247,7 +260,7 @@ audience（这段产品写给谁，4-80 字）、
 offer（一句话承诺，4-80 字）、
 headline（主标题，2-40 字，会出现在页面第一屏）、
 subhead（副标题，4-90 字）、
-features 正好 3 个 {title(2-24字), body(4-80字)}，
+features 正好 3 个 {title(2-24字), body(4-80字), emoji(单个最贴合的 emoji 字符)}，
 mike {title(2-16字), body(8-220字), evidence(从 headline、subhead、offer、features.title 里原样摘出一句)}，
 iris {同上}，emma {同上}。
 evidence 必须是那几句文案里的原句，一个字都不能改。`;
@@ -256,10 +269,10 @@ const BUILD_SCHEMA = `只返回 JSON。这一步把已定的方向编译成页�
 字段：
 faqs 正好 3 个 {q(2-40字), a(4-160字)}，
 plans 正好 3 个 {name(1-12字), year(1-16字), month(1-16字), points 至少 2 条(1-40字)}，价格用人民币，
-products 为 {name(1-24字), price 数字, note(1-40字)}，store 至少 3 个，
-services 为 {name(1-24字), price 数字, note(1-40字)}，booking 至少 2 个，
-places 为 {name, area(1-12字), note(4-40字)}，recommend 至少 4 个，
-posts 为 {title(2-32字), excerpt(4-60字), body(8-280字)}，blog 至少 3 个，
+products 为 {name(1-24字), price 数字, note(1-40字), emoji(单个最贴合的 emoji 字符)}，store 至少 3 个，
+services 为 {name(1-24字), price 数字, note(1-40字), emoji(单个 emoji)}，booking 至少 2 个，
+places 为 {name, area(1-12字), note(4-40字), emoji(单个 emoji)}，recommend 至少 4 个，
+posts 为 {title(2-32字), excerpt(4-60字), body(8-280字), emoji(单个 emoji)}，blog 至少 3 个，
 rows 为 {name(1-24字), owner(1-12字), status(1-8字), amount(1-16字)}，dashboard 至少 6 个，
 todos 为 {title(2-32字), done}，todo 至少 3 个，
 seo {title(2-40字), description(4-90字), keywords(2-40字)}，growth {headline(2-60字), audience(2-60字)}，metric {name(2-24字), why(4-80字)}，

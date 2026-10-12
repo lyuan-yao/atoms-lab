@@ -1,5 +1,6 @@
 import { CLIENT_JS } from "./runtime.js";
 import { KIND_LABEL, PALETTES, escapeHtml, themeCss } from "./spec.js";
+import { artFigure, pickEmoji } from "./art.js";
 
 const h = escapeHtml;
 
@@ -37,7 +38,7 @@ h1{font-size:clamp(36px,5vw,60px);line-height:1.05;letter-spacing:-.04em;margin:
 .kicker{font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--accent-2)}
 .section{padding:28px 0}
 .section h2{font-size:28px;letter-spacing:-.03em;margin:0 0 8px}
-.grid-3,.price-grid,.shop-grid,.place-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+.grid-3,.price-grid,.shop-grid,.place-grid,.post-list{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
 .place-grid,.post-list{grid-template-columns:1fr 1fr}
 .card,.price,.place,.post{background:var(--surface);border:1px solid var(--line);border-radius:18px;padding:16px}
 .card h3,.price h3,.place h3{margin:8px 0}
@@ -61,7 +62,11 @@ input,textarea{width:100%;border:1px solid var(--line);background:var(--surface)
 .footer{padding:28px 0 40px;color:var(--muted);font-size:13px;display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap}
 .shop-grid{grid-template-columns:repeat(3,1fr)}
 .product{display:flex;flex-direction:column;gap:6px}
-.swatch{height:120px;border-radius:14px;background:linear-gradient(145deg,var(--soft),var(--accent))}
+.thumb{margin:0 0 10px;border-radius:14px;overflow:hidden;aspect-ratio:4/3;background:var(--soft)}
+.thumb svg{display:block;width:100%;height:100%;transition:transform .45s ease}
+.product:hover .thumb svg,.place:hover .thumb svg,.post:hover .thumb svg{transform:scale(1.05)}
+.place .thumb,.post .thumb{aspect-ratio:16/9;margin-bottom:12px}
+[data-ico]::before{content:attr(data-ico);margin-right:7px}
 .cart{position:sticky;bottom:12px;background:var(--surface);border:1px solid var(--line);border-radius:18px;padding:14px;display:grid;gap:8px}
 .cart-row{display:flex;justify-content:space-between;gap:8px}
 .appbar{display:flex;justify-content:space-between;align-items:center;padding:18px 0}
@@ -86,6 +91,19 @@ body.is-editing [data-eid].is-picked{outline:2px solid var(--accent);outline-off
   .nav-toggle{display:inline-flex}
   .nav-links{display:none;position:absolute;top:58px;left:16px;right:16px;flex-direction:column;align-items:flex-start;background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:12px}
   .nav-links.is-open{display:flex}
+}
+@media (max-width:560px){
+  h1{font-size:27px;letter-spacing:-.02em}
+  .layout-bold h1{font-size:32px}
+  .section h2{font-size:21px}
+  .sub{font-size:15px}
+  .appbar{flex-wrap:wrap;gap:10px}
+  .appbar h1{margin-bottom:4px}
+  .kpis strong{font-size:22px}
+  .scoreline strong{font-size:30px}
+  .arena{height:300px}
+  th,td{padding:9px;font-size:13px}
+  .wrap{width:calc(100% - 24px)}
 }
 `;
 
@@ -124,9 +142,12 @@ function footer(spec) {
   return `<footer class="wrap footer"><span>${h(spec.brand)} · ${h(KIND_LABEL[spec.kind])}</span><span>由 Atoms Lab 编译，可独立打开</span></footer>`;
 }
 
-function marketing(spec) {
+function marketing(spec, paletteKey) {
   const features = spec.features
-    .map((item, index) => `<article class="card"><p class="kicker">0${index + 1}</p><h3>${h(item.title)}</h3><p class="muted">${h(item.body)}</p></article>`)
+    .map((item, index) => {
+      const icon = item.emoji ? ` data-ico="${h(item.emoji)}"` : "";
+      return `<article class="card"><p class="kicker">0${index + 1}</p><h3${icon}>${h(item.title)}</h3><p class="muted">${h(item.body)}</p></article>`;
+    })
     .join("");
   const plans = spec.plans
     .map(
@@ -182,10 +203,10 @@ function marketing(spec) {
     ${footer(spec)}`;
 }
 
-function storePage(spec) {
+function storePage(spec, paletteKey) {
   const cards = spec.products
     .map(
-      (item) => `<article class="card product"><div class="swatch"></div><h3>${h(item.name)}</h3><p class="muted">${h(item.note)}</p><strong>¥${item.price}</strong><button class="btn" type="button" data-add data-name="${h(item.name)}" data-price="${item.price}">加入购物袋</button></article>`,
+      (item) => `<article class="card product">${artFigure({ name: item.name, note: item.note, kind: "store", emoji: item.emoji, seed: `${item.name}·${spec.brand}`, palette: paletteKey })}<h3>${h(item.name)}</h3><p class="muted">${h(item.note)}</p><strong>¥${item.price}</strong><button class="btn" type="button" data-add data-name="${h(item.name)}" data-price="${item.price}">加入购物袋</button></article>`,
     )
     .join("");
   return `<div id="top"></div>
@@ -219,9 +240,10 @@ function storePage(spec) {
 
 function bookingPage(spec) {
   const services = spec.services
-    .map(
-      (item) => `<button type="button" data-service="${h(item.name)}">${h(item.name)}<small class="muted"> ${item.price ? "¥" + item.price : "免费"} · ${h(item.note)}</small></button>`,
-    )
+    .map((item) => {
+      const icon = pickEmoji({ name: item.name, note: item.note, kind: "booking", emoji: item.emoji });
+      return `<button type="button" data-service="${h(item.name)}" data-ico="${h(icon)}">${h(item.name)}<small class="muted"> ${item.price ? "¥" + item.price : "免费"} · ${h(item.note)}</small></button>`;
+    })
     .join("");
   const times = ["10:00", "11:30", "14:00", "16:00", "19:00"]
     .map((time) => `<button type="button" data-time="${time}">${time}</button>`)
@@ -284,10 +306,10 @@ function todoPage(spec) {
     ${footer(spec)}`;
 }
 
-function blogPage(spec) {
+function blogPage(spec, paletteKey) {
   const posts = spec.posts
     .map(
-      (post) => `<article class="post" data-post="${h(post.title)}"><h3>${h(post.title)}</h3><p class="muted">${h(post.excerpt)}</p><button class="btn ghost" type="button" data-read="${h(post.title)}">阅读</button></article>`,
+      (post) => `<article class="post" data-post="${h(post.title)}">${artFigure({ name: post.title, note: post.excerpt, kind: "blog", emoji: post.emoji, seed: `${post.title}·${spec.brand}`, palette: paletteKey })}<h3>${h(post.title)}</h3><p class="muted">${h(post.excerpt)}</p><button class="btn ghost" type="button" data-read="${h(post.title)}">阅读</button></article>`,
     )
     .join("");
   return `<main class="wrap">
@@ -314,10 +336,10 @@ function gamePage(spec) {
     ${footer(spec)}`;
 }
 
-function recommendPage(spec) {
+function recommendPage(spec, paletteKey) {
   const cards = spec.places
     .map(
-      (place, index) => `<article class="place" data-place="${h(place.name + place.area + place.note)}" data-id="p${index}"><p class="kicker">${h(place.area)}</p><h3>${h(place.name)}</h3><p class="muted">${h(place.note)}</p><button class="btn ghost" type="button" data-like>喜欢</button></article>`,
+      (place, index) => `<article class="place" data-place="${h(place.name + place.area + place.note)}" data-id="p${index}">${artFigure({ name: place.name, note: place.note, kind: "recommend", emoji: place.emoji, seed: `${place.name}·${spec.brand}`, palette: paletteKey })}<p class="kicker">${h(place.area)}</p><h3>${h(place.name)}</h3><p class="muted">${h(place.note)}</p><button class="btn ghost" type="button" data-like>喜欢</button></article>`,
     )
     .join("");
   return `<main class="wrap">
@@ -336,7 +358,7 @@ function stamp(html) {
   const scriptAt = html.indexOf("<script");
   const cut = scriptAt === -1 ? html.length : scriptAt;
   let count = 0;
-  const stamped = html.slice(0, cut).replace(/<(h1|h2|h3|p|button|a)\b([^>]*)>/gi, (match, tag, rest) => {
+  const stamped = html.slice(0, cut).replace(/<(h1|h2|h3|p|button|a|li)\b([^>]*)>/gi, (match, tag, rest) => {
     if (/\sdata-eid=/.test(rest)) return match;
     count += 1;
     return `<${tag} data-eid="e${count}"${rest}>`;
@@ -348,9 +370,9 @@ export function renderApp(spec, { variant = 0, palette } = {}) {
   const paletteKey = palette || spec.palette;
   const layout = LAYOUTS[variant] || "studio";
   const colors = PALETTES[paletteKey] || PALETTES.cobalt;
-  let main = marketing(spec);
+  let main = marketing(spec, paletteKey);
   let data = null;
-  if (spec.kind === "store") main = storePage(spec);
+  if (spec.kind === "store") main = storePage(spec, paletteKey);
   if (spec.kind === "booking" || (spec.kind === "brand" && /预约|取花|到店/.test(spec.prompt))) main = bookingPage(spec);
   if (spec.kind === "dashboard") {
     main = dashboardPage(spec);
@@ -361,11 +383,11 @@ export function renderApp(spec, { variant = 0, palette } = {}) {
     data = { todos: spec.todos };
   }
   if (spec.kind === "blog") {
-    main = blogPage(spec);
+    main = blogPage(spec, paletteKey);
     data = { posts: spec.posts };
   }
   if (spec.kind === "game") main = gamePage(spec);
-  if (spec.kind === "recommend") main = recommendPage(spec);
+  if (spec.kind === "recommend") main = recommendPage(spec, paletteKey);
   const html = stamp(documentWrap({ spec, palette: paletteKey, layout, main, data }));
   const letters = ["A", "B", "C"];
   return {

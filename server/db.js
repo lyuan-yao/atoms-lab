@@ -84,8 +84,25 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS pub_views (
     slug TEXT NOT NULL,
     day TEXT NOT NULL,
-    count INTEGER NOT NULL DEFAULT 0,
+    count INTEGER NOT NULL,
     PRIMARY KEY (slug, day)
+  );
+  CREATE TABLE IF NOT EXISTS pub_feedback (
+    slug TEXT PRIMARY KEY,
+    likes INTEGER NOT NULL DEFAULT 0
+  );
+  CREATE TABLE IF NOT EXISTS email_codes (
+    email TEXT PRIMARY KEY,
+    code_hash TEXT NOT NULL,
+    expires_at INTEGER NOT NULL,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    last_sent_at INTEGER NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS pub_comments (
+    id TEXT PRIMARY KEY,
+    slug TEXT NOT NULL,
+    body TEXT NOT NULL,
+    created_at INTEGER NOT NULL
   );
 `);
 

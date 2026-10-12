@@ -6,4 +6,7 @@ data/
 .chrome-cdp/
 .browse-tools/
 【请创建副本后使用】研发笔试——XXX.md
+研发笔试*.md
+.cursor/
+.atoms-deploy/
 

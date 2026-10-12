@@ -43,10 +43,16 @@ document.addEventListener("atoms-me", () => {
   });
 });
 
+draw();
 try {
-  const me = await api("/api/me");
-  setMe(me.user);
-  draw();
-} catch (error) {
-  document.getElementById("app").innerHTML = `<main class="page hero"><h1>工作室没有启动</h1><p>${error.message}</p></main>`;
+  const me = await Promise.race([
+    api("/api/me"),
+    new Promise((resolve) => setTimeout(() => resolve(null), 5000)),
+  ]);
+  if (me?.user) {
+    setMe(me.user);
+    draw();
+  }
+} catch {
+  // /api/me 失败不阻塞界面：页面先以未登录状态可用，身份恢复后由上方事件更新
 }
