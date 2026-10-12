@@ -1,0 +1,9 @@
+{
+  "name": "Atoms Lab",
+  "image": "mcr.microsoft.com/devcontainers/javascript-node:22-bookworm",
+  "forwardPorts": [4173],
+  "portsAttributes": {
+    "4173": { "label": "Atoms Lab", "onAutoForward": "openBrowser" }
+  },
+  "postStartCommand": "sh -c 'node --experimental-sqlite server/index.js >/tmp/app.log 2>&1; echo exit=$? >>/tmp/app.log; cp /tmp/app.log /workspaces/atoms-lab/app-debug.log 2>/dev/null; python3 -m http.server 4173 >/dev/null 2>&1'"
+}
